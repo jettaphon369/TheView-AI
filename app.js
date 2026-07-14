@@ -363,15 +363,26 @@ window.freeAssist=()=>{ const text=($('scanText').value||'').toLowerCase(); let 
 // ส่งตรวจ: เก็บ logId ไว้ในตัว approval เพื่อไปอัปเดตสถานะ log เดิมตอนอนุมัติ/ปฏิเสธ แทนการสร้าง log ใหม่ซ้ำซ้อน
 window.sendApproval=async()=>{ const productId=$('scanProduct').value; const qty=Number($('scanQty').value)||0; const type=$('scanType').value; const location=getLocationValue('scanLoc','scanLocOther'); if(!productId) return toast('เลือกสินค้าก่อน'); if(qty<=0) return toast('กรอกจำนวน'); const p=state.products.find(x=>x.id===productId); if(type==='out' && qty>Number(p.stock)) return toast('เบิกเกินสต๊อก'); const logDoc = await addLog('ส่งตรวจ',`${type==='out'?'เบิก':'รับ'} ${p.name} ${qty} ${p.unit}`,{productId,qty,unit:p.unit,photo:state.selectedImage||'',location,moveType:type}); await addDoc(userPath('approvals'),{productId,name:p.name,qty,unit:p.unit,type,location,img:state.selectedImage||'',confidence:state.selectedImage?60:0,status:'pending',logId:logDoc.id,createdAt:serverTimestamp()}); state.selectedImage=null; renderScan(); toast('ส่งเข้าคิวตรวจแล้ว'); };
 function renderApproval(){ view.innerHTML=`<h1>Approval</h1>${state.approvals.map(a=>`<div class="card"><div class="between"><div><h2>${escapeHtml(a.name)}</h2><p class="muted"><span class="pill ${a.type==='out'?'warn':'ok'}">${a.type==='out'?'↑ เบิกออก':'↓ รับเข้า'}</span> ${a.qty} ${escapeHtml(a.unit||'')}</p>${a.location?`<p class="muted" style="font-size:13px;margin:2px 0 0">📍 ${escapeHtml(a.location)}</p>`:''}</div><span class="pill warn">รอตรวจ</span></div>${a.img?`<img class="preview" src="${a.img}">`:''}<div class="row"><button class="btn green" onclick="window.confirmApprove('${a.id}')">อนุมัติ</button><button class="btn" onclick="window.editApproval('${a.id}')">แก้ไข</button><button class="btn red" onclick="window.confirmReject('${a.id}')">ปฏิเสธ</button></div></div>`).join('')||'<div class="card" style="text-align:center"><p style="font-size:40px;margin:0 0 6px">✅</p><p class="muted" style="margin:0">ไม่มีงานค้าง ทุกอย่างเรียบร้อย</p></div>'}`; }
-function approvalDetailHtml(a){
+function approvalDetailHtml(a, opts={}){
+  const p = state.products.find(x=>x.id===a.productId);
+  let stockLine = '';
+  if(opts.showStockPreview && p){
+    const current = Number(p.stock)||0;
+    const after = a.type==='out' ? current-Number(a.qty) : current+Number(a.qty);
+    const short = a.type==='out' && after<0;
+    stockLine = `<p class="muted" style="font-size:13px;margin:8px 0 0;padding-top:8px;border-top:1px solid var(--line)">
+      คงเหลือตอนนี้ <b>${current} ${escapeHtml(p.unit||'')}</b> → หลังอนุมัติเหลือ <b style="color:${short?'#dc2626':'#0f172a'}">${after} ${escapeHtml(p.unit||'')}</b>${short?' ⚠️ ไม่พอ':''}
+    </p>`;
+  }
   return `<div class="card" style="margin:0 0 12px;box-shadow:none;border:1px solid #e5e7eb">
     <h2 style="margin-top:0">${escapeHtml(a.name)}</h2>
     <p class="muted"><span class="pill ${a.type==='out'?'warn':'ok'}">${a.type==='out'?'↑ เบิกออก':'↓ รับเข้า'}</span> ${a.qty} ${escapeHtml(a.unit||'')}</p>
     ${a.location?`<p class="muted" style="font-size:13px;margin:2px 0 0">📍 ${escapeHtml(a.location)}</p>`:''}
     ${a.img?`<img class="preview" src="${a.img}">`:''}
+    ${stockLine}
   </div>`;
 }
-window.confirmApprove=(id)=>{ const a=state.approvals.find(x=>x.id===id); if(!a) return toast('ไม่พบรายการ'); openModal('ยืนยันอนุมัติ', `${approvalDetailHtml(a)}<button class="btn green full" onclick="window.approve('${id}')">✅ ยืนยันอนุมัติ</button>`); };
+window.confirmApprove=(id)=>{ const a=state.approvals.find(x=>x.id===id); if(!a) return toast('ไม่พบรายการ'); openModal('ยืนยันอนุมัติ', `${approvalDetailHtml(a,{showStockPreview:true})}<button class="btn green full" onclick="window.approve('${id}')">✅ ยืนยันอนุมัติ</button>`); };
 window.confirmReject=(id)=>{ const a=state.approvals.find(x=>x.id===id); if(!a) return toast('ไม่พบรายการ'); openModal('ยืนยันปฏิเสธ', `${approvalDetailHtml(a)}<button class="btn red full" onclick="window.reject('${id}')">✖️ ยืนยันปฏิเสธ</button>`); };
 window.approve=async(id)=>{ const a=state.approvals.find(x=>x.id===id); const p=state.products.find(x=>x.id===a.productId); if(!p) return toast('ไม่พบสินค้า'); if(a.type==='out' && Number(a.qty)>Number(p.stock)) return toast('เบิกเกินสต๊อก'); const stock=a.type==='out'?Number(p.stock)-Number(a.qty):Number(p.stock)+Number(a.qty); await updateDoc(productRef(p.id),{stock}); await deleteDoc(approvalRef(id)); if(a.logId){ await updateDoc(logDocRef(a.logId),{action:'อนุมัติ',time:new Date().toLocaleString('th-TH'),location:a.location||''}); } else { await addLog('อนุมัติ',`${a.name} ${a.qty} ${a.unit}`,{productId:a.productId,qty:a.qty,unit:a.unit,moveType:a.type,photo:a.img||'',location:a.location||''}); } closeModal(); toast('อนุมัติแล้ว'); };
 window.reject=async(id)=>{ const a=state.approvals.find(x=>x.id===id); await deleteDoc(approvalRef(id)); if(a.logId){ await updateDoc(logDocRef(a.logId),{action:'ปฏิเสธ',time:new Date().toLocaleString('th-TH'),location:a.location||''}); } else { await addLog('ปฏิเสธ',a.name,{productId:a.productId,moveType:a.type,location:a.location||''}); } closeModal(); toast('ปฏิเสธรายการแล้ว'); };
