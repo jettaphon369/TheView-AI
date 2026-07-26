@@ -1,0 +1,16 @@
+CHEE CHAN STOCK v34.16.2 SECURITY - STATIC VERIFICATION
+
+PASS - 1 Error handler ไม่มีตัวแปร title ที่ไม่ประกาศ
+PASS - 2 Backup ดึง Firestore โดยตรง
+PASS - 3 Import รักษาวันที่เดิม/จัดการ actorUid
+PASS - 4 Purge ลบ Product + SKU + Storage
+PASS - 5 ป้องกัน stock/min ติดลบ
+PASS - 6 First Password Gate เป็น Server-side
+PASS - 7 Approval ตรวจสินค้าและสต๊อกจริง
+PASS - 8 Audit Log มี Pagination
+PASS - 9 Build/Cache ตรงกัน
+PASS - Storage Gate สอดคล้องกับ Firestore
+
+JavaScript syntax: checked with node --check
+JSON config: checked with python json.tool
+Live Firebase deployment/emulator: not executed in this offline package test

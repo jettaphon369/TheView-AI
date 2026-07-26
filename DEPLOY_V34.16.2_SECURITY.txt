@@ -1,0 +1,8 @@
+ลำดับติดตั้ง v34.16.2 SECURITY
+
+1. firebase deploy --only functions:completeFirstPasswordChange
+2. อัปโหลดเว็บ v34.16.2 ขึ้น Cloudflare/GitHub
+3. firebase deploy --only firestore:rules,storage
+4. รีเฟรชเว็บทุกเครื่องหนึ่งครั้ง
+
+ห้าม Deploy Firestore Rules ใหม่ก่อน Cloud Function และหน้าเว็บใหม่ เพราะ Client รุ่นเก่าจะไม่มีสิทธิ์ปลด First Password Gate
