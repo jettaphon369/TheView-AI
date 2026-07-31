@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#004c39" />
+  <title>QR Preview • CHEE CHAN STOCK</title>
+  <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png?v=34.19.7" />
+  <style>
+    :root{--green:#004c39;--green2:#00684f;--cream:#f6f2e9;--ink:#1f352d;--muted:#6b7280;--line:#e6dccb;--gold:#d7b56d;}
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif;background:linear-gradient(180deg,#004c39 0 220px,#f7f3ea 220px 100%);color:var(--ink);}
+    body{padding:env(safe-area-inset-top) 0 max(22px,env(safe-area-inset-bottom));}
+    .wrap{width:min(680px,100%);margin:0 auto;padding:26px 20px 30px;}
+    .brand{display:flex;align-items:center;justify-content:center;gap:16px;color:#fff;margin:8px 0 28px;text-align:center;}
+    .brand img{width:66px;height:auto;filter:drop-shadow(0 8px 18px rgba(0,0,0,.18));}
+    .brand strong{display:block;letter-spacing:.08em;font-size:28px;line-height:1.05;}
+    .brand span{display:block;color:#f2d896;font-weight:800;font-size:18px;margin-top:8px;}
+    .test-badge{display:inline-flex;align-items:center;padding:5px 12px;border-radius:999px;background:#e9c671;color:#14342a;font-size:14px;font-weight:900;letter-spacing:.12em;vertical-align:middle;margin-left:8px;}
+    .card{background:rgba(255,253,248,.98);border:1px solid var(--line);border-radius:30px;padding:22px;box-shadow:0 18px 45px rgba(31,53,45,.12);}
+    .safe{display:inline-flex;align-items:center;gap:8px;background:#dcfce7;color:#166534;border-radius:999px;padding:9px 14px;font-weight:900;margin-bottom:20px;}
+    .photo{width:100%;border:1px solid #e2e8f0;border-radius:24px;overflow:hidden;background:#f8fafc;display:grid;place-items:center;min-height:230px;margin-bottom:22px;}
+    .photo img{width:100%;height:auto;max-height:420px;object-fit:contain;display:block;}
+    .placeholder{font-size:84px;padding:70px 0;}
+    .kicker{margin:0 0 4px;color:#087256;font-size:19px;font-weight:900;}
+    h1{margin:0 0 18px;font-size:44px;line-height:1.1;letter-spacing:-.02em;}
+    .grid{display:grid;gap:14px;margin:18px 0;}
+    .field{background:#fff;border:1px solid #e3dfd6;border-radius:20px;padding:18px 20px;}
+    .field span{display:block;color:#64748b;font-size:18px;font-weight:800;margin-bottom:8px;}
+    .field b{display:block;color:#17223b;font-size:22px;line-height:1.25;}
+    .stock b{font-size:30px;color:#00684f;}
+    .note{background:#f0fdf4;border:1px solid #bbf7d0;color:#065f46;border-radius:18px;padding:17px 18px;font-weight:850;line-height:1.55;font-size:18px;margin:20px 0;}
+    .btn{appearance:none;border:0;border-radius:18px;width:100%;min-height:62px;padding:14px 18px;background:linear-gradient(135deg,#008465,#004c39);color:#fff;font-size:20px;font-weight:900;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 24px rgba(0,76,57,.18);}
+    .btn:active{transform:translateY(1px)}
+    .unavailable{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:20px;padding:18px;font-weight:850;line-height:1.55;font-size:18px;margin:16px 0;}
+    .card.is-unavailable .safe{background:#ffedd5;color:#9a3412}
+    .loading,.error{text-align:center;padding:50px 16px;color:#475569;font-weight:800;}
+    .error h1{font-size:30px;color:#7f1d1d;}
+    @media(max-width:480px){.wrap{padding:22px 16px 26px}.brand{display:block;margin-top:4px}.brand img{width:56px;margin-bottom:10px}.brand strong{font-size:24px}.brand span{font-size:16px}.card{border-radius:28px;padding:18px}h1{font-size:39px}.photo{min-height:190px}.field{padding:16px 18px}.field span{font-size:17px}.field b{font-size:21px}.stock b{font-size:28px}.note{font-size:17px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand">
+      <img src="chee-chan-logo.png" alt="CHEE CHAN GOLF RESORT">
+      <div><strong>CHEE CHAN STOCK </strong><span>Food & Beverage Inventory Management</span></div>
+    </div>
+    <section class="card" id="card"><div class="loading">กำลังโหลดพรีวิวสินค้า...</div></section>
+  </main>
+  <script type="module">
+    import { firebaseConfig } from './firebase-config.js?v=34.19.7';
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
+    import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
+    const ENV='MAIN';
+    const EXPECTED= ENV==='TEST' ? 'wjb-story' : 'theview-4d389';
+    const card=document.getElementById('card');
+    const esc=(v)=>String(v??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]));
+    function getId(){
+      const url=new URL(location.href);
+      const keys=['id','p','qr','product','productId'];
+      for(const k of keys){ const v=url.searchParams.get(k); if(v) return v.trim(); }
+      const h=String(url.hash||'').replace(/^#/,'').trim();
+      if(h){
+        const hp=new URLSearchParams(h.startsWith('?')?h.slice(1):h);
+        for(const k of keys){ const v=hp.get(k); if(v) return v.trim(); }
+        if(!/[=&/]/.test(h) && h.length>=8) return h;
+      }
+      return '';
+    }
+    function stockLabel(p){
+      const n=Number(p.stock);
+      const qty=Number.isFinite(n)?n.toLocaleString('th-TH'):(p.stock ?? '-');
+      return `${qty} ${p.unit||'หน่วย'}`;
+    }
+    function staffUrl(id){
+      // v34.19.7: ปุ่มนี้เท่านั้นที่ควรพาไป Login/หน้าพนักงาน
+      // ใส่ qrStaffLogin=1 เพื่อแยกจาก QR รุ่นเก่าที่อาจใช้ staffProduct โดยตรง
+      const url=new URL('/index.html', location.origin);
+      url.search=''; url.hash='';
+      url.searchParams.set('staffProduct', id);
+      url.searchParams.set('qrStaffLogin','1');
+      url.searchParams.set('v','34.19.7');
+      return url.toString();
+    }
+    function isActivePreview(p){
+      return !!p && p.status === 'active' && p.revoked !== true && p.deleted !== true;
+    }
+    function renderUnavailable(id,title='QR นี้ไม่พร้อมใช้งาน'){
+      card.classList.add('is-unavailable');
+      card.innerHTML=`
+        <div class="safe">🔒 ตรวจสอบแล้ว</div>
+        <div class="photo"><div class="placeholder">📦</div></div>
+        <p class="kicker">ข้อมูลเบื้องต้นจาก QR Code</p>
+        <h1>${esc(title)}</h1>
+        <div class="unavailable">สินค้านี้ถูกลบ ปิดใช้งาน หรือไม่มีข้อมูลอยู่ในระบบแล้ว จึงไม่แสดงชื่อสินค้า รูปภาพ ยอดคงเหลือ หรือข้อมูลภายในจาก QR นี้</div>
+        <a class="btn" href="${esc(new URL('/index.html?v=34.19.7', location.origin).toString())}">เข้าสู่ระบบ</a>
+      `;
+    }
+    function render(p,id){
+      if(!isActivePreview(p)){
+        renderUnavailable(id, p?.missing ? 'ไม่พบข้อมูลสินค้าจาก QR Code' : 'สินค้านี้ถูกลบหรือปิดใช้งานแล้ว');
+        return;
+      }
+      card.classList.remove('is-unavailable');
+      const photo=p.photo?`<img src="${esc(p.photo)}" alt="${esc(p.name||'รูปสินค้า')}" loading="eager" decoding="async">`:'<div class="placeholder">📦</div>';
+      card.innerHTML=`
+        <div class="safe">🔒 พรีวิวปลอดภัย</div>
+        <div class="photo">${photo}</div>
+        <p class="kicker">ข้อมูลเบื้องต้นจาก QR Code</p>
+        <h1>${esc(p.name||'-')}</h1>
+        <div class="grid">
+          <div class="field"><span>รหัสสินค้า</span><b>${esc(p.sku||'-')}</b></div>
+          <div class="field"><span>หมวดหมู่</span><b>${esc(p.category||'ทั่วไป')}</b></div>
+          <div class="field"><span>หน่วยนับ</span><b>${esc(p.unit||'หน่วย')}</b></div>
+          <div class="field stock"><span>คงเหลือรวม</span><b>${esc(stockLabel(p))}</b></div>
+          <div class="field"><span>สถานะ</span><b>พร้อมใช้งาน</b></div>
+        </div>
+        <div class="note">หน้านี้แสดงเฉพาะข้อมูลเบื้องต้นและยอดคงเหลือรวม ไม่แสดงประวัติ ล็อต ราคา หรือข้อมูลภายใน ก่อนเข้าสู่ระบบพนักงาน</div>
+        <a class="btn" href="${esc(staffUrl(id))}">เข้าสู่หน้าสินค้าสำหรับพนักงาน</a>
+      `;
+    }
+    async function main(){
+      const id=getId();
+      if(!id){ card.innerHTML='<div class="error"><h1>ไม่พบรหัสสินค้า</h1><p>ลิงก์ QR นี้ไม่มีรหัสสินค้า กรุณาสร้าง QR ใหม่จากระบบ</p></div>'; return; }
+      try{
+        if(firebaseConfig.projectId!==EXPECTED) throw new Error('Firebase project mismatch');
+        const app=initializeApp(firebaseConfig);
+        const fs=getFirestore(app);
+        const snap=await getDoc(doc(fs,'theviewWorkspaces','main','publicProducts',id));
+        if(snap.exists()){
+          const data={id,...snap.data()};
+          if(!isActivePreview(data)) renderUnavailable(id,'สินค้านี้ถูกลบหรือปิดใช้งานแล้ว');
+          else render(data,id);
+        }else{
+          renderUnavailable(id,'ไม่พบข้อมูลสินค้าจาก QR Code');
+        }
+      }catch(err){
+        console.error(err);
+        card.innerHTML='<div class="error"><h1>เปิดพรีวิวไม่สำเร็จ</h1><p>ตรวจสอบ Firestore Rules หรือสร้าง QR ใหม่อีกครั้ง</p><a class="btn" href="'+esc(staffUrl(id))+'">เข้าสู่หน้าสินค้าสำหรับพนักงาน</a></div>';
+      }
+    }
+    main();
+  </script>
+</body>
+</html>
