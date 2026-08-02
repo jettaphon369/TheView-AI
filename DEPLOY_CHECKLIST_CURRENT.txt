@@ -1,0 +1,48 @@
+CHEE CHAN STOCK MAIN - v34.22.1 MAIN USER MANUAL CLEANUP
+
+จุดประสงค์เวอร์ชันนี้
+- ปรับคู่มือเต็มหน้า manual.html ให้เหมาะกับการใช้งานจริง
+- ตัดเนื้อหา Admin/Training/TEST-MAIN ออกจากคู่มือผู้ใช้งาน
+- เพิ่มข้อควรระวัง รูปหลักฐาน และวิธีแจ้งเมื่อบันทึกผิด
+- อัปเดต Cache Version เป็น 34.22.1
+
+วิธีอัปผ่าน GitHub
+1) แตก ZIP นี้
+2) เอาไฟล์ทั้งหมดใน ZIP ไปทับใน Repository ของ MAIN
+3) Commit และรอ Cloudflare Pages Deploy
+4) เปิดเว็บใหม่และรีเฟรชเพื่อตรวจว่า Cache เป็นชุดล่าสุด
+
+ไฟล์หลักที่ต้องมีใน Repo
+- index.html
+- app.js
+- main.css
+- service-worker.js
+- manual.html
+- qr.html
+- firebase-config.js
+- firestore.rules
+- storage.rules
+- manifest.webmanifest
+- chee-chan-logo.png
+- chee-chan-course-original.jpg
+- icon-192.png
+- icon-512.png
+- favicon-64.png
+- favicon.ico
+
+จุดตรวจหลัง Deploy
+- เปิด manual.html ได้ทั้งมือถือและ PC
+- คู่มือไม่แสดงหัวข้อจัดการสมาชิก
+- คู่มือไม่แสดง Checklist/Training หรือข้อความ TEST/MAIN
+- ปุ่ม “กลับเข้าระบบ” ทำงาน
+- ปุ่ม “พิมพ์ / บันทึก PDF” ทำงาน
+- ช่องค้นหาในคู่มือกรองหัวข้อได้
+- เปิดหัวข้อ Login / รับเข้า / เบิกออก / LOT-FEFO / QR / ประวัติ / รายงาน / FAQ ได้ครบ
+- กลับเข้าเว็บหลักแล้ว Login ได้ตามปกติ
+- หน้าสต๊อก รับเข้า เบิกออก ประวัติ รายงาน และสมาชิกยังทำงานตามเดิม
+
+หมายเหตุสำคัญ
+- เวอร์ชันนี้ไม่ต้อง Deploy Firestore Rules เพิ่ม ถ้า MAIN เคยใช้ Rules ของ v34.21.1 ขึ้นไปแล้ว
+- ไม่ต้อง Deploy Cloud Functions
+- TEST และ MAIN ต้องใช้ ZIP คนละชุด ห้ามนำ TEST ไปทับ MAIN
+Firebase Project: theview-4d389
