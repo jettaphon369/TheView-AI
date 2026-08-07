@@ -1,0 +1,358 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath() {
+      return /databases/$(database)/documents/members/$(request.auth.uid);
+    }
+
+    function memberExists() {
+      return signedIn() && exists(memberPath());
+    }
+
+    function me() {
+      return get(memberPath()).data;
+    }
+
+    // ใช้สำหรับอ่านโปรไฟล์/เปลี่ยนรหัสครั้งแรกเท่านั้น
+    function enabledMember() {
+      return memberExists() && me().get('status', '') == 'active';
+    }
+
+    // Backward-compatible gate:
+    // สมาชิกเก่าบางบัญชีไม่มี field mustChangePassword/passwordChangePending
+    // จึงต้องใช้ Map.get(default) เพื่อไม่ให้ Rules โยน error และบล็อกทั้งบัญชี
+    function active() {
+      // passwordChangePending เป็นเพียงสถานะระหว่างเปลี่ยนรหัส และต้องไม่ล็อกบัญชี
+      // เมื่อ mustChangePassword ถูกปิดแล้ว (รองรับบัญชีเก่า/สถานะค้างจากการอัปเดต)
+      return enabledMember()
+        && me().get('mustChangePassword', false) != true;
+    }
+
+    function roleIs(value) {
+      return active() && me().get('role', 'staff') == value;
+    }
+
+    function admin() {
+      return roleIs('admin');
+    }
+
+    function manager() {
+      return roleIs('manager') || roleIs('director') || admin();
+    }
+
+    function captain() {
+      return roleIs('captain') || roleIs('supervisor');
+    }
+
+    function manageProducts() {
+      return captain() || manager()
+        || (active() && me().get('permissions', {}).get('canManageProducts', false) == true);
+    }
+
+    function manageLots() {
+      return captain() || manager()
+        || (active() && me().get('permissions', {}).get('canManageLots', false) == true);
+    }
+
+    function adjustStock() {
+      return captain() || manager()
+        || (active() && me().get('permissions', {}).get('canAdjustStock', false) == true);
+    }
+
+    function approver() {
+      return captain()
+        || manager()
+        || (active() && me().get('permissions', {}).get('canApprove', false) == true);
+    }
+
+    function canAssignApprovers() {
+      return captain() || manager();
+    }
+
+
+    // Stock house/area access guard (v34.29.0)
+    function stockAccess() {
+      return me().get('stockAccess', {'mode': 'all', 'groupIds': [], 'areaKeys': []});
+    }
+
+    function stockAccessUnrestricted() {
+      return admin() || stockAccess().get('mode', 'all') != 'restricted';
+    }
+
+    function stockAreaKey(groupId, areaId) {
+      return groupId + '::' + areaId;
+    }
+
+    function canUseStockLocation(groupId, areaId) {
+      return stockAccessUnrestricted()
+        || groupId in stockAccess().get('groupIds', [])
+        || stockAreaKey(groupId, areaId) in stockAccess().get('areaKeys', []);
+    }
+
+    function canUseProductLocation(data) {
+      return canUseStockLocation(data.get('stockGroupId', ''), data.get('stockAreaId', ''));
+    }
+
+    // Product + Batch/Lot validation (v34.18.1)
+    // Firestore Rules cannot loop/sum every element in an array, therefore the app
+    // performs the per-lot quantity checks and the rules enforce the outer shape,
+    // non-negative product stock, and role/field boundaries.
+    function validProductDocument(data) {
+      return data.get('name', '') is string
+        && data.get('name', '').size() > 0
+        && data.get('stock', -1) is number
+        && data.get('stock', -1) >= 0
+        && data.get('min', 0) is number
+        && data.get('min', 0) >= 0
+        && data.get('lots', []) is list
+        && data.get('hasExpiry', false) is bool
+        && data.get('expiryDate', '') is string;
+    }
+
+    function validLotStockUpdate(data) {
+      return validProductDocument(data)
+        && data.get('lots', []) is list
+        && data.get('stock', -1) >= 0;
+    }
+
+    function productPath(productId) {
+      return /databases/$(database)/documents/theviewWorkspaces/main/products/$(productId);
+    }
+
+    function validPendingApprovalShape(data) {
+      return data.get('status', '') == 'pending'
+        && data.get('qty', 0) is number
+        && data.get('qty', 0) > 0
+        && (data.get('type', '') == 'in' || data.get('type', '') == 'out')
+        && data.get('productId', '') is string
+        && data.get('productId', '') != '';
+    }
+
+    function validPendingApprovalProduct(data) {
+      return exists(productPath(data.get('productId', '')))
+        && get(productPath(data.get('productId', ''))).data.get('trashed', false) != true
+        && get(productPath(data.get('productId', ''))).data.get('archived', false) != true
+        && get(productPath(data.get('productId', ''))).data.get('stock', -1) is number
+        && get(productPath(data.get('productId', ''))).data.get('stock', -1) >= 0
+        && canUseProductLocation(get(productPath(data.get('productId', ''))).data)
+        && (
+          data.get('type', '') == 'in'
+          || data.get('qty', 0) <= get(productPath(data.get('productId', ''))).data.stock
+        );
+    }
+
+    function validPendingApproval(data) {
+      return validPendingApprovalShape(data)
+        && validPendingApprovalProduct(data);
+    }
+
+    match /members/{uid} {
+      // เจ้าของบัญชีต้องอ่านโปรไฟล์ตัวเองได้ แม้ยังติด First Password Gate
+      allow get: if enabledMember() && (
+        request.auth.uid == uid || captain() || manager()
+      );
+
+      allow list: if captain() || manager();
+      allow create: if admin();
+      // Factory Reset: Admin ลบโปรไฟล์สมาชิกคนอื่นได้ แต่ลบบัญชีตัวเองไม่ได้
+      allow delete: if admin() && request.auth.uid != uid;
+
+      // Admin จัดการสมาชิกได้ แต่ต้องเป็นบัญชีที่ผ่าน gate แล้ว
+      allow update: if admin();
+
+      // เจ้าของบัญชีแก้ได้เฉพาะข้อมูลส่วนตัวเท่านั้น; password gate แก้ได้จาก Admin SDK/Cloud Function เท่านั้น
+      allow update: if enabledMember()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'firstName',
+          'lastName',
+          'displayName',
+          'position',
+          'department',
+          'phone',
+          'photoURL',
+          'profileUpdatedAt',
+          'lastLoginAt',
+          'mustChangePassword',
+          'passwordChangePending',
+          'passwordChangedAt'
+        ]);
+
+      allow update: if canAssignApprovers()
+        && resource.data.role == 'staff'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'permissions',
+          'approvalAssignedBy',
+          'approvalAssignedAt'
+        ]);
+    }
+
+    match /theviewWorkspaces/main/products/{id} {
+      allow read: if active();
+
+      // สร้างสินค้าได้เมื่อยอดเริ่มต้นและจุดเตือนไม่ติดลบ
+      allow create: if manageProducts() && validProductDocument(request.resource.data) && canUseProductLocation(request.resource.data);
+      allow delete: if manageProducts();
+      allow update: if (admin() && validLotStockUpdate(request.resource.data))
+        // Product managers can edit master data and can add a new lot to an
+        // existing product (same product name, different expiry/receipt lot).
+        || (manageProducts()
+          && validLotStockUpdate(request.resource.data)
+          && canUseProductLocation(resource.data)
+          && canUseProductLocation(request.resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name','sku','skuKey','category','unit','min',
+            'stock','lots','hasExpiry','expiryDate','expiryReminderDays','expiryAlertDays',
+            'archived','trashed','trashedAt','photo','photoPath','updatedAt',
+            'lastAdjustedAt','lastAdjustedBy','lastAdjustedReason',
+            'stockGroupId','stockGroupName','stockAreaId','stockAreaName','stockAreaPath'
+          ]))
+        // Stock adjustment and approval flows must update stock and lots in the
+        // same atomic transaction, including the nearest-expiry summary fields.
+        || (manageLots()
+          && validLotStockUpdate(request.resource.data)
+          && canUseProductLocation(resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'lots','hasExpiry','expiryDate','updatedAt'
+          ]))
+        || (adjustStock()
+          && validLotStockUpdate(request.resource.data)
+          && canUseProductLocation(resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'stock','lots','hasExpiry','expiryDate','updatedAt',
+            'lastAdjustedAt','lastAdjustedBy','lastAdjustedReason'
+          ]))
+        || (approver()
+          && validLotStockUpdate(request.resource.data)
+          && canUseProductLocation(resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'stock','lots','hasExpiry','expiryDate','updatedAt',
+            'lastAdjustedAt','lastAdjustedBy','lastAdjustedReason'
+          ]));
+    }
+
+
+    match /theviewWorkspaces/main/publicProducts/{id} {
+      // Public QR preview: unauthenticated scanners can read only this sanitized document.
+      allow read: if true;
+
+      allow create, update: if active()
+        && exists(productPath(id))
+        && request.resource.data.keys().hasOnly([
+          'productId','name','sku','skuKey','category','unit','stock','photo','status','publicLabel','updatedAt'
+        ])
+        && request.resource.data.get('productId','') == id
+        && request.resource.data.get('name','') is string
+        && request.resource.data.get('category','') is string
+        && request.resource.data.get('unit','') is string
+        && request.resource.data.get('stock',0) is number
+        && request.resource.data.get('stock',0) >= 0
+        && request.resource.data.get('photo','') is string
+        && request.resource.data.get('status','') in ['active','archived','trashed'];
+
+      allow delete: if manageProducts();
+    }
+
+    match /theviewWorkspaces/main/skuRegistry/{id} {
+      allow read: if active();
+      allow create, update, delete: if manageProducts();
+    }
+
+    match /theviewWorkspaces/main/approvals/{id} {
+      allow create: if validPendingApproval(request.resource.data)
+        && (admin() || (active()
+          && request.resource.data.submittedByUid == request.auth.uid));
+
+      allow read: if approver()
+        || (active() && resource.data.submittedByUid == request.auth.uid);
+
+      allow update: if validPendingApproval(request.resource.data)
+        && resource.data.status == 'pending'
+        && request.resource.data.submittedByUid == resource.data.submittedByUid
+        && request.resource.data.productId == resource.data.productId
+        && (
+          approver()
+          || (
+            active()
+            && resource.data.submittedByUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'qty','type','location','stockLocation','destinationLocation','issueDestination','stockGroupId','stockGroupName','stockAreaId','stockAreaName','stockAreaPath','eventId','logId','updatedAt','updatedByUid','updatedByName'
+            ])
+          )
+        );
+
+      allow delete: if approver()
+        || (
+          active()
+          && resource.data.submittedByUid == request.auth.uid
+          && resource.data.status == 'pending'
+        );
+    }
+
+    match /theviewWorkspaces/main/logs/{id} {
+      allow create: if active() && request.resource.data.actorUid == request.auth.uid && (request.resource.data.get('productId','') == '' || (exists(productPath(request.resource.data.get('productId',''))) && canUseProductLocation(get(productPath(request.resource.data.get('productId',''))).data)));
+      allow read: if active();
+
+      allow update: if approver()
+        || (
+          active()
+          && resource.data.actorUid == request.auth.uid
+          && resource.data.action == 'ส่งตรวจ'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'action','detail','qty','unit','location','stockLocation','destinationLocation','issueDestination','stockGroupId','stockGroupName','stockAreaId','stockAreaName','stockAreaPath','moveType','time','updatedAt','cancelledAt'
+          ])
+          && (
+            request.resource.data.action == 'ส่งตรวจ'
+            || request.resource.data.action == 'ยกเลิก'
+          )
+        );
+
+      allow delete: if admin();
+    }
+
+    match /theviewWorkspaces/main/auditLogs/{id} {
+      allow create: if active()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.immutable == true
+        && (request.resource.data.get('productId','') == '' || (exists(productPath(request.resource.data.get('productId',''))) && canUseProductLocation(get(productPath(request.resource.data.get('productId',''))).data)));
+      allow read: if manageProducts();
+      allow update: if false;
+      allow delete: if admin();
+    }
+
+
+
+    match /theviewWorkspaces/main/notifications/{id} {
+      allow read: if active();
+      allow create: if active();
+      allow update: if active() && (
+        admin() || resource.data.userUid == request.auth.uid
+      );
+      allow delete: if admin()
+        || (active() && resource.data.userUid == request.auth.uid);
+    }
+
+    match /theviewWorkspaces/main/settings/{id} {
+      // Branding settings are safe for the public login/landing screen.
+      // Other system settings remain readable only after login.
+      allow get: if id == 'appBranding' || active();
+      allow list: if active();
+      allow create, update, delete: if admin();
+    }
+
+    // เอกสาร workspace แม่ ใช้ลบเฉพาะตอน Factory Reset
+    match /theviewWorkspaces/main {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if admin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
